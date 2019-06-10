@@ -1,0 +1,731 @@
+---
+title: 'PRAC 2: Limpieza y validación de los datos'
+author: "Javier Jiménez Reyes"
+date: "22 de mayo de 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+<!--Sirve para justificar todo el texto-->
+<style>
+body {
+text-align: justify}
+</style>
+
+```{r include=FALSE, echo=FALSE, eval=FALSE}
+##Paquetes instalados
+install.packages("knitr")
+install.packages("pandas")
+install.packages("ggpubr")
+install.packages("caret")
+install.packages("pROC")
+install.packages("ggplot2")
+```
+
+##0. Tratamiento del dataframe: Titanic: Machine Learning from Disaster
+
+A continuación se desarrollan las principales etapas de un proyecto analítico para el tratamiento del dataframe [**Titanic: Machine Learning from Disaster**](https://www.kaggle.com/c/titanic). Cada una de la tareas a realizar se abordarán individualmente indicando los comandos en **R** utilizados en cada uno de los pasos.
+
+##1. Descripción del dataframe. ¿Por qué es importante y qué pregunta/problema pretende responder?
+
+La pregunta que se pretende resolver con el análisis del dataframe **Titanic** es averiguar qué tipo de personas tenían probabilidades de sobrevivir. Así pues el **objetivo** es: predecir qué pasajeros sobrevivieron a la tragedia).
+
+Para poder describir el dataframe primero de todo se realizará la carga de los datos. La página web donde se encuentra el repositorio de datos, divide los registros en dos archivos descargables (**trian.csv** y **test.csv**):
+
+```{r}
+##Carga archivo de train.csv
+direccion<-getwd()
+direccion<-paste(direccion,"/titanic/train.csv",sep="")
+titanic_train<-read.csv(direccion,header=TRUE)
+
+#Carga archivo de test.csv
+direccion<-getwd()
+direccion<-paste(direccion,"/titanic/test.csv",sep="")
+titanic_test<-read.csv(direccion,header=TRUE)
+```
+
+Con los datos ya cargados se realiza un primer análisis de la configuración de las tablas y de que información contienen. 
+
+Nombre de las variables del dataframe **titanic_train**: 
+
+```{r}
+names(titanic_train)
+```
+
+Nombre de las variables del dataframe **titanic_test**:
+
+```{r}
+names(titanic_test)
+```
+
+Tal y como se puede observar el dataframe **titanic_train** se compone de una variable más que el dataframe **titanic_test**. Esta variable extra corresponde al atributo **Survived**, que indica si el tripulante registrado sobrevivió (valor 1) o no (valor 0).
+
+De la web [**Titanic: Machine Learning from Disaster**](https://www.kaggle.com/c/titanic/data) desde donde se ha descargado el repositorio de datos, se obtiene el siguiente diccionario de variables: 
+
+| Variable      | Descripción                      | Valores                                |
+| ------------- | -------------------------------- | -------------------------------------- |
+| survival      | Superviviente                    | 0=No, 1=Si                             |
+| pclass        | Clase billete                    | 1=1st,2=2nd, 3=3rd                     |
+| sex           | Sexo                             | male/female                            |
+| Age           | Edad (en años)                   |                                        |
+| sibsp         | Nº de hermanos/conyugues a bordo |                                        |
+| parch         | Nº de padres/hijos a bordo       |                                        |
+| ticket        | Nº de ticket                     |                                        |
+| fare          | Tarifa de pasajero               |                                        |
+| cabin         | Nº del camarote                  |                                        |
+| embarked      | Puerto de embarque               | C=Cherbourg,Q=Queenstown,S=Southampton |
+
+Se analiza ahora el número de registros de cada dataframe:
+
+```{r}
+#Nº de observaciones dataframe titanic_train:
+cat("El número de registros del dataframe titanic_trian es: ", nrow(titanic_train))
+
+#Nº de observaciones dataframe titanic_test:
+cat("El número de registros del dataframe titanic_test es: ", nrow(titanic_test))
+```
+
+Tal y como se puede observar el nº de registros del dataframe **titanic_train** es algo mayor que el doble de observaciones del dataframe **titanic_test**.
+
+Una vez analizada la composición de cada uno de los dataframe, se analizan si el tipo de objeto que lo representa es el correcto. Para verificar el tipo de variable que R ha asignado a cada uno de los atributo al realizar la lectura y carga de los archivos.
+
+Dataframe **titanic_test**:
+
+```{r}
+res <- sapply(titanic_test,class)
+knitr::kable(data.frame(Variables=names(res),Clase=as.vector(res)))
+```
+
+Dataframe **titanic_train**:
+
+```{r}
+res <- sapply(titanic_train,class)
+knitr::kable(data.frame(Variables=names(res),Clase=as.vector(res)))
+```
+
+Como se puede observar en los resultados es necesario de ajustar el tipo de variable de algunos de los resultados. Las variables **Survived** y **Pclass** han de convertirse a **factores** puesto que pese a mostrar valores numéricos, realmente el tipo de dato que hay tras este valor es cualitativo y no cuantitativo.
+
+```{r echo=FALSE}
+#Factorización de la variable Survived
+titanic_train$Survived<-as.factor(titanic_train$Survived)
+
+#Factorización de la variables Pclass
+titanic_train$Pclass<-as.factor(titanic_train$Pclass)
+titanic_test$Pclass<-as.factor(titanic_test$Pclass)
+```
+
+Si ahora se analiza la clase de las variables se obtiene:
+
+```{r}
+#Clase variable Survived
+class(titanic_train$Survived)
+
+#Calse variable Pclass
+class(titanic_train$Pclass)
+class(titanic_test$Pclass)
+```
+
+
+##2. Integración y selección de los datos de interés a analizar.
+
+
+En el siguiente apartado se integran todos los datos en una sola tabla para su posterior análisis. Para poder integrar la totalidad de los datos en una sola tabla que permita su posterior tratamiento será necesario igualar el número de variables. Tal y como se pudo ver en el anterior apartado el dataframe **titanic_train** tiene el atributo **Survived** por lo que se crea el mismo atributo en el dataframe **titanic_test** y se rellena con valores nulos (NA).
+
+```{r}
+titanic_test$Survived <- NA
+```
+
+Notar que el motivo de realizar la transformación de la variable **Survived** a factor únicamente en el dataframe titanic_train y no en titanic_test, es debido a que no interesa contemplar los valores NA como factores, sino que se sigan interpretando como **valores nulos**.
+
+Una vez los dos dataframe tienen la misma estructura se genera un nuevo atributo en cada uno de ellos para poderlos diferenciar y poderlos volver a separar en los dos dataframe iniciales (test y train), una vez depurada la información. Para ello se crea el atributo **TrainSet**.
+
+En el caso del dataframe **titanic_train** este atributo tomará valores verdaderos para cada registro, mientras que para el caso del dataframe **titanic_test**, tomara valores falsos.
+
+```{r}
+#Creación del atributo TrainSet en los dos dataframe
+titanic_train$TrainSet<-TRUE
+titanic_test$TrainSet<-FALSE
+```
+
+Una vez los dos data set ya están preparados, se procede a su integración en una única tabla/repositorio de datos.
+
+```{r}
+titanic_completo<-rbind(titanic_train,titanic_test)
+```
+
+Si se analiza ahora la tabla resultante se observa que: 
+
+```{r}
+#Nº de registros de la tabla titanic_completo
+cat("El nº de registros es: ",nrow(titanic_completo))
+#Nº de columnas de la tabla titanic_completo
+cat("El nº de columnas es: ",ncol(titanic_completo))
+```
+
+Por ahora en este apartado se decide no eliminar ningún campo por si puede ser de utilidad a la hora de realizar la limpieza de datos, relacionando conceptos que permitan rellenar los registros vacíos o nulos. La decisión de que atributos eliminar o dejar fuera para la elaboración del modelo predictivo que permita dar respuesta al caso de estudio, se realizará al inicio del apartado 4. 
+
+
+##3. Limpieza de los datos.
+
+En el siguiente apartado se procede a detectar la existencia ceros o elementos vacíos y a su gestión.
+
+###3.1. ¿Los datos contienen ceros o elementos vacíos? ¿Cómo gestionarías cada uno de estos casos?
+
+Para la detección de valores vacíos y nulos se utiliza la siguiente función:
+
+```{r}
+summary(titanic_completo)
+```
+
+Tal y como se puede observar las variables que contienen algún valor nulo (NA) o vacío ( ) son las siguientes: 
+
+- El atributo **Survived** contiene 418 registros nulos (NA). Estos corresponden a los 418 registros del dataframe **titanic_test**. Estos se completarán con el modelo predictivo que se defina.
+
+- El atributo **Age** contiene 263 registros nulos (NA).
+
+- El atributo **Fare** contiene 1 registro nulo (NA).
+
+- El atributo **Cabin** contiene 1014 registros vacíos ( ).
+
+- El atributo **Embarked** contiene 2 registros vacíos ( ).
+
+A continuación se irán tratando individualmente cada uno de los casos detectados para los atributos: **Fare**, **Cabin**, **Embarked** y **Age**.
+
+**Gestión del atributo Fare**:
+
+Para calcular el valor por el que substituir el valor nulo del atributo **Fare**, se decide utilizar en este caso el método de calcular **la media del atributo para las muestra de la misma clase**. Para ello el atributo que se emplea como elemento clasificador, es el atributo **Pclass**.
+
+```{r}
+#Cálculo de los valores medios
+res<-tapply(titanic_completo$Fare,titanic_completo$Pclass, mean, na.rm=TRUE)
+#Se muestra el resultado
+res
+```
+
+Una vez obtenidos los valores promedio del atributo **Fare** según la clase del pasajero, es necesario conocer la cual es la clase del registro con el valor nulo. 
+
+```{r}
+#Obtención del registro con valor nulo para el atributo Fare
+res<-titanic_completo[is.na(titanic_completo$Fare),]
+#Clase del tripulante del registro con el valor nulo
+res$Pclass
+```
+
+Se obtiene que el tripulante con el valor de **Fare** nulo pertenece a la **Pclass** 3 que ha dado un valor promedio de 13.303.
+
+Con el objetivo de observar variaciones en el resultado en el caso de añadir más atributos clasificadores en el cálculo del valor promedio, se añade el atributo **Sex** al cálculo.  
+
+```{r}
+#Cálculo de los valores medios
+res<-tapply(titanic_completo$Fare, list(titanic_completo$Sex,titanic_completo$Pclass), mean, na.rm=TRUE)
+#Se muestra el resultado
+res
+```
+
+Para el registro con el valor **Fare** nulo el valor de **Sex** es:
+
+```{r}
+#Obtención del registro con valor nulo para el atributo Fare
+res<-titanic_completo[is.na(titanic_completo$Fare),]
+#Clase del tripulante del registro con el valor nulo
+res$Sex
+```
+
+Así pues si el valor promedio de los registro con valor **Sex = male** y **Pclass = 3** es de 12.415. Se puede observar que la diferencia entre los dos valores calculados es pequeña y al tratarse únicamente de un valor que reemplazar en una tabla de 1309 registros, esta variación no es significativa. Por lo tanto se decide substituir el valor nulo para el atributo **Fare** por el valor de **13.30289**.
+
+```{r}
+titanic_completo[is.na(titanic_completo$Fare),"Fare"]<-13.30289
+```
+
+**Gestión del atributo Cabin**:
+
+En el caso del atributo **Cabin** debido a que el nº de registros vacíos es del 70% de los registros, se decide eliminar esta columna del dataframe. 
+
+```{r}
+titanic_completo$Cabin<-NULL
+```
+
+**Gestión del atributo Embarked**:
+
+En el caso del atributo **Embarked** al no tratarse de un valor numérico como los atributos **Age** y **Fare**, no se puede calcular un valor promedio como tal. Por este motivo el método para decidir con qué valor cumplimentar los dos valores vacíos es observando la correlación entre los atributos **Embarked** y **Pclass**.
+
+```{r}
+table(titanic_completo$Pclass,titanic_completo$Embarked)
+```
+
+Tal y como se puede observar en el resultado de la tabla obtenida los dos valores vacíos corresponden a registros de dos tripulantes que viajan en **primera clase** (Pclass = 1). Si se observa cómo se distribuyen los registros que pertenece a esta clase turística, se puede apreciar que el embarque se hace principalmente entre la puerta **C** y **S**, siendo esta última la que tiene más registros. De igual modo para el resto de pasajeros de 2a y 3a clase, el embarque principalmente se realiza por la puerta **S**. 
+
+Notar que si nuevamente aparte de tener en cuenta el atributo **Pclass** se añadiese también el atributo **Sex** el resultado sería el siguiente: 
+
+```{r}
+table(titanic_completo$Pclass,titanic_completo$Embarked,titanic_completo$Sex)
+```
+
+En este caso se puede observar como el valor mayoritario de puerta de embarque al que pertenecen los registros del mismo **Sex** (femenino) y **Class** (primera clase) que el de los dos registros con valores de embarque vacíos, es la puerta de embarque **C**. Así pues en este caso el resultado variaría. No obstante tal y como se comentó en la depuración de la variable **Age**, lo adecuado sería mirar si seleccionando la **C** como resultado adecuado para substituir el valor vacío, el modelo final se ajusta mejor. 
+
+Por lo tanto se decide substituir para los dos registros con valor vacío para el atributo **Embarked** por el valor **S**.
+
+```{r}
+titanic_completo[titanic_completo$Embarked=='',"Embarked"]<-'S'
+```
+
+**Gestión del atributo Age**:
+
+En el caso del atributo **Age** se puede observar que son varios los registros que contienen un valor nulo. Así pues intentar completarlos analizándolos a título individual cada uno de ellos sería una tarea compleja. Por ese motivo las opciones propuestas dos: 
+
+- Mediante el uso de la **media del atributo para las muestra de la misma clase**.
+
+- Mediante el **valor más probable** por medio de técnicas como la regresión. 
+
+Para este caso se decide escoger la opción del **valor más probable** por medio de técnicas como la regresión como método de resolución. Lo adecuado e interesante sería una vez resuelto el ejercicio y obtenidos los resultados, ver si depurando este atributo por medio de la primera opción el ajuste del modelo predictivo sería igual de bueno o no. Con este apunte se pretende remarcar una de las características importantes en los proyectos analíticos de ciencia de datos: el proceso de un proyecto de ciencia de datos es **iterativo**.
+
+Lo primero que se realizará será crear el modelo de regresión formado por los atributos **Pclass**, **SibSp**, **Parch** y **Embarked**: 
+
+```{r}
+#Definición de la equación del modelo de regresión
+ecuacion="Age ~ Pclass + SibSp + Parch + Embarked"
+#Cálculo del modelo de regresión
+regresion<-lm(formula = ecuacion, data=titanic_completo)
+```
+
+Una vez generado el modelo se aplica para calcular el valor del atributo **Age** para los registros con valor nulo. Para ello es necesario crear un *sub dataframe* únicamente con los registros con valor del atributo **Age** nulos y con los atributos utilizados en la ecuación de la regresión (**Pclass**, **SibSp**, **Parch** y **Embarked**):
+
+```{r}
+#Creación del sub dataframe
+Age.NA<-titanic_completo[is.na(titanic_completo$Age),c("Pclass","SibSp","Parch","Embarked")]
+#Aplicación de la regresión para el cálculo de los valores nulos de Age
+prediccion.Age<-predict(regresion,newdata = Age.NA)
+```
+
+Una vez calculados los valores se procede a su substitución en el dataframe original:
+
+```{r}
+titanic_completo[is.na(titanic_completo$Age),"Age"]<-prediccion.Age
+```
+
+Tras realizar las distintas acciones para tratar los registros con valores nulos y vacíos se vuelve a verificar la situación de los distintos atributos. 
+
+```{r}
+summary(titanic_completo)
+```
+
+Como se puede observar todos los valores nulos o vacíos han sido tratados y ya no aparecen.
+
+
+###3.2. Identificación y tratamiento de valores extremos.
+
+Para la detección de valores anómalos o extremos en las variables numéricas (**Age**, **SibSP**, **Parch** y **Fare**) se utiliza la representación gráfica de los valores estos atributos mediante un boxplot
+
+```{r}
+bx.Age<-ggpubr::ggboxplot(titanic_completo$Age)
+bx.SibSP<-ggpubr::ggboxplot(titanic_completo$SibSp)
+bx.Parch<-ggpubr::ggboxplot(titanic_completo$Parch)
+bx.Fare<-ggpubr::ggboxplot(titanic_completo$Fare)
+
+ggpubr::ggarrange(bx.Age,bx.SibSP,bx.Parch,bx.Fare,labels=c("Age","SibSP","Parch","Fare"),ncol = 2, nrow = 2)
+```
+
+Tal y como se puede apreciar en los gráficos en todos los atributos analizados, aparecen valores extremos. 
+
+Una vez detectados visualmente los valores extremos se buscan los bigotes del del boxplot para conocer los límites a partir de los que aparecen estos valores en el boxplot
+
+```{r}
+bx.Age<-boxplot.stats(titanic_completo$Age)
+bx.Age$stats
+bx.SibSP<-boxplot.stats(titanic_completo$SibSp)
+bx.SibSP$stats
+bx.Parch<-boxplot.stats(titanic_completo$Parch)
+bx.Parch$stats
+bx.Fare<-boxplot.stats(titanic_completo$Fare)
+bx.Fare$stats
+```
+
+Para cumplimentar esta información se extraen por cada una de las variables el nº de valores extremos: 
+
+```{r}
+#Nº de valores extremos
+#Age
+length(boxplot(titanic_completo$Age,plot=FALSE)$out)
+#SibSP
+length(boxplot(titanic_completo$SibSp,plot=FALSE)$out)
+#Parch
+length(boxplot(titanic_completo$Parch,plot=FALSE)$out)
+#Fare
+length(boxplot(titanic_completo$Fare,plot=FALSE)$out)
+```
+
+En base al contaje de valores extremos detectados se podría aplicar como tratamiento para las variables **Age** y **SibSp**, eliminar la totalidad del registro por no tratarse de un número significativo de registros, mientras que en el caso de las variables **Parch** y **Fare** se podría aplicar una substitución de los valores extremos por el valor promedio o valor del bigote superior o inferior (según el caso) calculado anteriormente, ya que su volumen es mayor. No obstante se decide aplicar la segunda opción de tratamiento (substitución por el valor) en todos los atributos. 
+
+Partiendo de esta premisa se continúa analizando para valorar si se aplica dicho criterio a todos los valores extremos o únicamente a unos cuantos.
+
+Se analiza la distribución de estos valores extremos en las variables **SibSp** y **Parch**: 
+
+Atributo **SibSp**:
+```{r}
+table(boxplot(titanic_completo$SibSp,plot=FALSE)$out)
+```
+
+Atributo **Parch**:
+```{r}
+table(boxplot(titanic_completo$Parch,plot=FALSE)$out)
+```
+
+Partiendo de la información visual y numérica se toman las siguientes decisiones: 
+
+- En el caso de la variable **SibSp** aparece un valor extremo muy por encima del resto. Este corresponde a 9 registros que indican que el número de hermanos o esposas del tripulante es 8. Tanto los registros con un valor de **SibSp** de 8 como de 5 se asumen como valores anómalos dentro de los valores extremos y son los que se deciden tratar, mientras que los registros con un valor por debajo de 5 se asumen como correcto. Como acción se substituye el valor reduciendo a un valor de 4 (extremo que se ha considerado como asumible).
+
+```{r}
+#Cambio de los valores extremos
+titanic_completo$SibSp[titanic_completo$SibSp>4]=4
+#Verificación
+table(boxplot(titanic_completo$SibSp,plot=FALSE)$out)
+```
+
+- En el caso de la variable **Parch** referente al número de padres o niños abordo por el pasajero se decide tomar como valor extremo aceptable el valor 2. Por lo tanto se decide reducir todos los registros con un valor superior a 2 a éste.
+
+```{r}
+#Cambio de los valores extremos
+titanic_completo$Parch[titanic_completo$Parch>2]=2
+#Verificación
+table(boxplot(titanic_completo$Parch,plot=FALSE)$out)
+```
+
+- En cuanto a la variable **Fare** se decide substituir la totalidad de los valores extremos por el valor del bigote superior del boxplot que corresponde a 65. 
+
+```{r}
+#Cambio de los valores extremos
+titanic_completo$Fare[titanic_completo$Parch>bx.Fare$stats[5]]=bx.Fare$stats[5]
+```
+
+- Finalmente se gestiona la variable **Age** para la que se miran los distintos registros extremos existentes. 
+
+```{r}
+table(boxplot(titanic_completo$Age,plot=FALSE)$out)
+```
+
+Como se puede observar aparecen valores negativos lo que no tiene sentido. Como medida correctiva se decide substituir los valores extremos inferiores por el valor del bigote inferior (0.42000) y en el caso de los valores extremos superiores se deciden dejar. 
+
+```{r}
+#Cambio de los valores extremos
+titanic_completo$Age[titanic_completo$Age<bx.Age$stats[1]]=bx.Age$stats[1]
+```
+
+##4. Análisis de los datos.
+
+En este apartado se realizará tanto la selección campos que se utilizar para la generación del modelo de predicción y que se indicó en el apartado 2 que se realizaría en este punto del análisis, como la selección de los registros que se emplearán para el análisis. 
+
+###4.1. Selección de los grupos de datos que se quieren analizar/comparar (planificación de los análisis a aplicar).
+
+Lo primero que se realizará será la selección de los campos que se deciden emplear para la generación del modelo predictivo, los cuales son: 
+
+- PassangerId. Se utilizará únicamente como índice pero no se empleará para la generación del modelo de predicción.
+
+- Survived. 
+
+- Pclass. 
+
+- Sex. 
+
+- Age.
+
+- SibSp.
+
+- Parch.
+
+- Fare.
+
+- Embarked.
+
+- TrainSet. Este último campo se empleará únicamente para realizar la separación de registros nuevamente en los grupos de datos de **train** y **test**. 
+
+Para mantener la tabla original se decide guardar estos nuevos campos en un nuevo dataframe 
+
+```{r}
+titanic2<-titanic_completo[,c(1,2,3,5,6,7,8,10,11,12)]
+```
+
+Una vez seleccionados los atributos necesarios para la generación del modelo de predicción y con los datos ya tratados se vuelven a generar los grupos de datos **train** que se utilizarán para generar el modelo, y el grupo **test** que permitirán probar el modelo generado. Se guardaran en dos nuevos dataframe para así guardar los archivos originales.
+
+```{r}
+titanic_train2<-titanic2[titanic2$TrainSet==TRUE,]
+titanic_test2<-titanic2[titanic2$TrainSet==FALSE,]
+```
+
+Se realiza un pequeño análisis de dichas variables para el grupo de datos train: 
+
+Variables **categóricas**:
+```{r}
+par(mfrow=c(2,2))
+barplot(table(titanic_train2$Sex,titanic_train2$Survived),legend=TRUE,main= "Survived vs Sex")
+barplot(table(titanic_train2$Pclass,titanic_train2$Survived),legend=TRUE,main= "Survived vs Class")
+barplot(table(titanic_train2$Embarked,titanic_train2$Survived),legend=TRUE,main= "Survived vs Embarked")
+```
+
+A partir de los gráficos se pueden hacer las siguientes apreciaciones: 
+
+- El número de supervivientes es mayoritariamente de sexo femenino, así como en el caso de los registros que son víctimas, el sexo es mayoritariamente masculino. 
+
+- En el caso de contemplar la variable de la clase a la que pertenece el usuario, se puede observa que mayoritariamente el usuario que sobrevive pertenece a la primera clase. Por otro lado en el caso de los registros que resultan ser víctimas predominan los registros que pertenecían a la tercera clase. 
+
+- Finalmente se detecta que tanto el mayor numero de supervivientes como de víctimas pertenecen a la misma zona de embarque, la S. Mayoritariamente la muestra que contempla el grupo de **train** pertenece al embarque S.
+
+Variables **numéricas**:
+```{r}
+par(mfrow=c(2,1))
+boxplot(titanic_train2$Age~titanic_train2$Survived,horizontal=TRUE, main="Survived vs. Age")
+boxplot(titanic_train2$Fare~titanic_train2$Survived,horizontal=TRUE, main="Survived vs. Fare")
+```
+
+Para el caso de las variables **age** y **Fare** al compararlo con el resultado del campo **survived**, se hacen las siguientes observaciones: 
+
+- En el caso de la variable Age se puede observar que en el caso de los supervivientes los registros tienen una edad que oscila entre los 20 y los 40 años con la mediana alrededor de los 30 años. 
+
+- En el caso de la variable Tarifa se observa que la mayoría de los registros que resultan ser supervivientes, la tarifa oscila entre valores por encima de los registros que no sobreviven.
+
+###4.2. Comprobación de la normalidad y homogeneidad de la varianza.
+
+A continuación se verifica la normalidad de las variables numéricas: 
+
+```{r}
+shapiro.test(titanic_train2$Age)$p.value
+shapiro.test(titanic_train2$Fare)$p.value
+shapiro.test(titanic_train2$Parch)$p.value
+shapiro.test(titanic_train2$SibSp)$p.value
+```
+
+Como se puede observar en todos los casos se retorna un p-valor muy inferior al 5% por lo que se rechaza la hipótesis nula (H0) que la **muestra estudiada proviene de una población con una distribución normal**. 
+
+Se grafican las variables **Age** y **Fare** para verificar visualmente su distribución:
+
+```{r}
+par(mfrow=c(2,2))
+ggplot2::ggplot(titanic_test2, ggplot2::aes(Age)) + ggplot2::geom_histogram(binwidth = 10, colour="black")
+ggplot2::ggplot(titanic_test2, ggplot2::aes(Fare)) + ggplot2::geom_histogram(binwidth = 10, colour="black")
+```
+
+Tal y como se puede observar ninguna de las dos presenta una distribución normal. En el caso de la variable **Age** es menos acentuada esta falta de normalidad en la distribución en comparación a la variable Fare. Esto también se puede observar comprobando que el p-valor, calculado anteriormente, para la variable **Age** es mayor el de la variable **Fare**.
+
+Se calcula ahora la varianza y desviación estándar para las variables numéricas **Age** y **Fare** par las cuales se utiliza el test de **Fligner-Killeen**, ya que este tipo de test es adecuado cuando la muestra no presenta una distribución normal.
+
+Variable **Age**:
+
+```{r}
+fligner.test(Age~Survived, data=titanic_train2)
+```
+
+Para el caso de la variable **Age** el p-valor que retorna el test de Fligner-Killeen 0,06  es mayor que 0,05, lo que indica que no hay diferencias significativas en la variancia entre los grupos de datos para las variables **Age** y **Survived**. Lo que indica que hay homogeneidad en la varianza.
+
+Variable **Fare**:
+
+```{r}
+fligner.test(Fare~Survived, data=titanic_train2)
+```
+
+Para el caso de la variable **Fare** el p-valor que retorna el test de Fligner-Killeen 2.2e-16 es menor que 0,05, lo que indica que hay diferencias significativas en la variancia entre los grupos de datos para las variables **Age** y **Survived**. Lo que indica que no hay homogeneidad en la varianza.
+
+###4.3. Aplicación de pruebas estadísticas para comparar los grupos de datos. En función de los datos y el objetivo del estudio, aplicar pruebas de contraste de hipótesis, correlaciones, regresiones, etc. Aplicar al menos tres métodos de análisis diferentes.
+
+Para la realización del modelo predictivo que permita predecir si el pasajero sobrevive o no se decide emplear un **modelo de regresión logístico**. Se realizarán varios modelos variando el número de variables que interviene, y de todos ellos se comprobarán los valores AIC (es una medida de calidad relativa de un modelo estadístico, la cual basa su decisión en la bondad de ajuste del modelo y la complejidad del modelo). Esta medida indica que cuanto más pequeño es AIC mejor es el modelo.
+
+Generación de los modelos:
+
+```{r}
+#MODELO 1
+glm1<-glm(formula=titanic_train2$Survived~Pclass,data=titanic_train2,family="binomial")
+#MODELO 2
+glm2<-glm(formula=titanic_train2$Survived~Pclass+Sex,data=titanic_train2,family="binomial")
+#MODELO 3
+glm3<-glm(formula=titanic_train2$Survived~Pclass+Sex+Age,data=titanic_train2,family="binomial")
+#MODELO 4
+glm4<-glm(formula=titanic_train2$Survived~Pclass+Sex+Age+SibSp,data=titanic_train2,family="binomial")
+#MODELO 5
+glm5<-glm(formula=titanic_train2$Survived~Pclass+Sex+Age+SibSp+Parch,data=titanic_train2,family="binomial")
+#MODELO 6
+glm6<-glm(formula=titanic_train2$Survived~Pclass+Sex+Age+SibSp+Parch+Fare,data=titanic_train2,family="binomial")
+#MODELO 7
+glm7<-glm(formula=titanic_train2$Survived~Pclass+Sex+Age+SibSp+Parch+Fare+Embarked,data=titanic_train2,family="binomial")
+```
+
+Valores medida AIC:
+
+```{r}
+#MODELO 1
+AIC(glm1)
+#MODELO 2
+AIC(glm2)
+#MODELO 3
+AIC(glm3)
+#MODELO 4
+AIC(glm4)
+#MODELO 5
+AIC(glm5)
+#MODELO 6
+AIC(glm6)
+#MODELO 7
+AIC(glm7)
+```
+
+Tal y como se puede observar en los resultados el modelo que retorna mejores resultados es el 4 modelo en el que se tienen en cuenta únicamente los atributos: 
+**Pclass**, **Sex**, **Age** y **SibSp**.
+
+A continuación y utilizando el **cuarto caso** como modelo para realizar la predicción de la supervivencia del pasajero, se procede a su análisis. 
+
+```{r}
+summary(glm4)
+```
+
+Partiendo de los resultados obtenidos se realizan las siguientes observaciones:
+
+- Se puede apreciar que todas las variables tiene un p-valor inferior al 5%, por lo que dichas variables son significativas para el resultado del modelo. 
+
+- Se puede observar como el hecho de que el tripulante del registro sea hombre o pertenezca a la 2a o 3a clase, contribuye negativamente al modelo, haciendo que el resultado tienda a 0. Podemos ver en ello cierta lógica ya que en dicho suceso (el naufragio del Titanic), se conoce que la mayor parte de la gente que logró sobrevivir pertenecía a primera clase y se priorizaba el acceso a botes salvavidas primero a mujeres y niños. 
+
+A continuación se calcula la calidad del ajuste mediante la **matriz de confusión** (se supone un umbral de discriminación del 75%). 
+
+```{r}
+#Cálculo de los valores resultados con el modelo de regresión:
+p<-predict(object =glm4,newdata = titanic_train2,type="response")
+
+#Aplicación del umbral de discriminación del 75% a los resultados del modelo:
+prediocciones <- ifelse(p > 0.75, 1, 0)
+
+# Transformar en data.frame la lista de predicciones del modelo de regresión
+lista<- data.frame(matrix(unlist(prediocciones), nrow=891, byrow=T),stringsAsFactors=FALSE)
+names(lista)<-c("Survived")
+
+# Crear tabla únicamente con los datos del campo Survived de la tabla original de datos
+datos<-data.frame(titanic_train2$Survived)
+names(datos)<-c("Survived")
+
+# Conversión a factores la tabla datos
+datos$Survived<-factor(datos$Survived)
+
+# Conversión a factores los datos de la tabla de predicciones y escalado con los niveles de la tabla de datos.
+lista$Survived<-factor(lista$Survived,levels = levels(datos$Survived))
+
+#Matriz de confusión con los valores en factor
+caret::confusionMatrix(lista$Survived,datos$Survived)
+```
+
+Del análisis realizado se obtienen los siguientes resultados: 
+
+- El modelo predictivo ha calculado 726 registros con un valor Survived 0 (no ha sobrevivido) y 165 registros con un valor Survived 1 (ha sobrevivido).
+
+- Los valores reales de la tabla son 549 registros con un valor Survived 0 (no ha sobrevivido) y 342 registros con un valor Survived 1 (ha sobrevivido).
+
+- El total de **verdaderos positivos** es de: 155 registros donde la predicción ha indicado la supervivencia del tripulante y realmente la hay.
+
+- El total de **verdaderos negativos** es de: 539 registros donde la predicción ha indicado la no supervivencia del tripulante y realmente no la hay.
+
+- El total de **falsos positivos** es de: 10 registros donde la predicción ha indicado la supervivencia del tripulante y realmente no la hay.
+
+- El total de **falsos negativos** es de: 187 registros donde la predicción ha indicado la no supervivencia del tripulante y realmente la hay.
+
+Finalmente se emplea la curva ROC como otro método distinto para representar la calidad de los modelos predictivos anteriormente presentados. 
+
+```{r}
+x1<-pROC::roc(titanic_train2$Survived,predict(object =glm1,newdata = titanic_train2,type="response"))
+x2<-pROC::roc(titanic_train2$Survived,predict(object =glm2,newdata = titanic_train2,type="response"))
+x3<-pROC::roc(titanic_train2$Survived,predict(object =glm3,newdata = titanic_train2,type="response"))
+x4<-pROC::roc(titanic_train2$Survived,predict(object =glm4,newdata = titanic_train2,type="response"))
+x5<-pROC::roc(titanic_train2$Survived,predict(object =glm5,newdata = titanic_train2,type="response"))
+x6<-pROC::roc(titanic_train2$Survived,predict(object =glm6,newdata = titanic_train2,type="response"))
+x7<-pROC::roc(titanic_train2$Survived,predict(object =glm7,newdata = titanic_train2,type="response"))
+
+pROC::plot.roc(x1,colorize=TRUE,col='red')
+pROC::plot.roc(x2, add=TRUE,colorize=TRUE,col='blue')
+pROC::plot.roc(x3, add=TRUE,colorize=TRUE,col='green')
+pROC::plot.roc(x4, add=TRUE,colorize=TRUE,col='orange')
+pROC::plot.roc(x5, add=TRUE,colorize=TRUE,col='black')
+pROC::plot.roc(x6, add=TRUE,colorize=TRUE,col='purple')
+pROC::plot.roc(x7, add=TRUE,colorize=TRUE,col='yellow')
+```
+
+Antes de comenzar a analizar el resultado obtenido por cada uno de los modelos definidos, hay que comprender que se representa en él. El eje y del gráfico representa la sensibilidad o verdaderos positivos, mientras que en el eje x se representa la especificidad o los falsos positivos. Partiendo de estos conceptos se puede afirmar que, cuanto más se aproximen los valores de un modelo a la esquina superior izquierda del gráfico (coordenada (0,1)) mejor será, puesto que esto indicará que el modelo no arroja ningún falso negativo y ningún falso positivo.
+
+Tal y como se puede observar el gráfico muestra varias curvas ROC con una área similar debajo de ella. Indicar que a mayor área debajo de la curva mejor es el modelo generado puesto que esto refleja que los valores calculados por el modelo se aproximan al 100% de sensibilidad (ningún falso negativo) y un 100% de especifidad (ningún falso positivo). Dicho de otro modo cuanto mayor sea el área debajo de la curva ROC, mejor será el modelo.
+
+En base a lo anteriormente descrito si ahora se comprueba la curva ROC de los modelos graficados con menor área, se puede ver como éste corresponde al modelo 1 (curva roja). Esto coincide con los resultados calculados mediante la medida AIC, donde dicho modelo era el que tenía un valor mayor al resto mientras que los otros eran muy similares, aspecto que se ve también reflejado en el gráfico viendo que las curvas de los demás modelos prácticamente están superpuestas entre ellas.
+
+Para verificar y comprobar que el área mayor corresponde a la del modelo 4 y la menor a la del modelo 1 se utiliza la función auc() que devuelve el valor del área debajo de la curva ROC. 
+
+```{r}
+#MODELO 1
+pROC::auc(x1)
+#MODELO 2
+pROC::auc(x2)
+#MODELO 3
+pROC::auc(x3)
+#MODELO 4
+pROC::auc(x4)
+#MODELO 5
+pROC::auc(x5)
+#MODELO 6
+pROC::auc(x6)
+#MODELO 7
+pROC::auc(x7)
+```
+
+Tal y como se puede apreciar en los resultados el modelo 1 es el que tiene un valor de área menor mientras que el resto de modelos prácticamente tienen el mismo valor. En este caso se obtiene que el modelo con mayor área es el 7. 
+
+##5. Representación de los resultados a partir de tablas y gráficas.
+
+Una vez calculado el modelo predictivo se aplica al bloque de datos **test**. 
+
+```{r}
+#Cálculo de los valores resultados con el modelo de regresión:
+p<-predict(object =glm4,newdata = titanic_test2,type="response")
+
+#Aplicación del umbral de discriminación del 75% a los resultados del modelo:
+prediocciones <- ifelse(p > 0.75, 1, 0)
+
+# Transformar en data.frame la lista de predicciones del modelo de regresión
+lista<- data.frame(matrix(unlist(prediocciones), nrow=418, byrow=T),stringsAsFactors=FALSE)
+names(lista)<-c("Survived")
+
+#Carga de resultados en el conjunto de datos test2
+titanic_test2$Survived<-lista$Survived
+
+##Se generan los archivos test y entreno con los datos depurados
+write.csv(titanic_test2,file="titanic_test_tratado.csv",row.names=FALSE)
+write.csv(titanic_train2,file="titanic_train_tratado.csv",row.names=FALSE)
+```
+
+Con los datos finalmente cargados en el conjunto de datos de test, finalmente se vuelven a juntar los dos grupos de datos para su análisis final. 
+
+```{r}
+#Tabla general
+titanic2<-rbind(titanic_train2,titanic_test2)
+```
+
+Análisis de los resultados:
+
+```{r}
+#Tabla supervivientes
+table(titanic2$Survived)
+```
+
+```{r}
+#Supervivientes según sexo
+barplot(table(titanic2$Sex,titanic2$Survived),legend=TRUE)
+```
+
+```{r}
+#Supervivientes según clase
+barplot(table(titanic2$Pclass,titanic2$Survived),legend=TRUE)
+```
+
+##6. Resolución del problema. A partir de los resultados obtenidos, ¿cuáles son las conclusiones? ¿Los resultados permiten responder al problema?
+
+En base a los gráficos obtenidos en el apartado anterior se puede apreciar la influencia de los factores que se notaron en el análisis del modelo predictivo: 
+
+- Dentro de los registros de supervivientes el número de tripulantes masculinos es inferior al femenino. De forma contrario en el caso de los registros fallecidos, el tripulante de sexo masculino es mayor al femenino. 
+
+- A medida que la clase del pasajero mejora, el número de registros supervivientes también incrementa (supervivientes primera clase > supervivientes tercera clase). En el caso de los registros fallecidos, estos se dan en mayor proporción en usuarios de tercera y segunda clase. 
+
+Como conclusiones finales se puede decir que se ha llegado a un modelo predictivo que ha permitido predecir a partir de unos parámetros que definen el usuario del registro, si el pasajero sobreviviría o no al accidente respondiendo así a la pregunta formulada al inicio del ejercicio. 
+
+Indicar que la calidad del modelo es mejorable y es a partir de este punto en el que toca continuar iterando y realizando modificaciones en el modelo definido con la finalidad de mejorar la calidad de predicción ajustándola cada vez más. 
+
+Una acción que se podría llevar a cabo para la mejora del modelo sería dividir varias veces los datos en training y testing para luego presentar los resultados en forma de media +/- desviación estándar. Esto permitirá decidir cuál es el modelo más robusto, que en promedio representa mejor una serie de datos nuevos. El hecho de que de hacerlo de esto modo sea más óptimo/adecuado, es debido a que al dividir los datos en training y testing solo una vez se puede estar sobre- o infra-estimando los resultados. Podemos estar entrenando con un conjunto de datos que represente muy bien o muy mal los datos de test.
